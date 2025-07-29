@@ -2,14 +2,21 @@ import { useState, useCallback } from 'react';
 import { useLocalStorage } from './useLocalStorage';
 import { VOTING_CONFIG } from '@/utils/constants';
 import type { VoteState, UseVotingReturn } from '@/types';
-
 export function useVoting(contestantId: string): UseVotingReturn {
-    const [voteState, setVoteState] = useLocalStorage<VoteState>(`vote_${contestantId}`, {
+    const [voteStateRaw, setVoteState] = useLocalStorage<VoteState>(`vote_${contestantId}`, {
         contestantId,
         votesUsed: 0,
         maxVotes: VOTING_CONFIG.MAX_VOTES_PER_CONTESTANT,
         lastVoteTime: null
     });
+
+    // Add guard: fallback to default if undefined
+    const voteState = voteStateRaw || {
+        contestantId,
+        votesUsed: 0,
+        maxVotes: VOTING_CONFIG.MAX_VOTES_PER_CONTESTANT,
+        lastVoteTime: null
+    };
 
     const [isVoting, setIsVoting] = useState(false);
     const [voteMessage, setVoteMessage] = useState('');
@@ -24,10 +31,8 @@ export function useVoting(contestantId: string): UseVotingReturn {
         setVoteMessage('');
 
         try {
-            // Simulate API call delay
             await new Promise(resolve => setTimeout(resolve, VOTING_CONFIG.VOTE_SUBMISSION_DELAY));
 
-            // Simulate occasional failures
             if (Math.random() < VOTING_CONFIG.FAILURE_RATE) {
                 throw new Error('Vote submission failed. Please try again.');
             }

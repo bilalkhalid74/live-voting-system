@@ -1,5 +1,5 @@
 // __tests__/components/VoteButton.test.tsx
-import { render, screen, fireEvent, waitFor } from "@testing-library/react";
+import { render, screen, fireEvent } from "@testing-library/react";
 import { VoteButton } from "@/components/VoteButton";
 import { useVoting } from "@/hooks/useVoting";
 import type { Contestant, VotingWindow } from "@/types";
@@ -124,7 +124,7 @@ describe("VoteButton", () => {
     expect(screen.getByText("Voting...")).toBeInTheDocument();
   });
 
-  test("calls vote function when button is clicked", async () => {
+  test("calls vote function when button is clicked", () => {
     const mockVote = jest.fn();
     mockUseVoting.mockReturnValue({
       votesUsed: 0,

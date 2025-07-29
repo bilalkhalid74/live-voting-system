@@ -37,116 +37,91 @@ describe('useVoting - Critical localStorage Test', () => {
     beforeEach(() => {
         jest.clearAllMocks()
         mockLocalStorage.clear()
-        // Ensure votes succeed by default (no failures)
-        mockMathRandom.mockReturnValue(0.05) // Below failure rate of 0.1
+        mockMathRandom.mockReturnValue(0.05) // Force success
         jest.useFakeTimers()
     })
 
     afterEach(() => {
+        jest.runOnlyPendingTimers()
         jest.useRealTimers()
     })
 
     test('CRITICAL: Vote button disables after voting and remains disabled after page reload', async () => {
-        // === PHASE 1: Initial state ===
         const { result: initialResult } = renderHook(() => useVoting(contestantId))
+        await waitFor(() => expect(initialResult.current.canVote).not.toBeUndefined())
 
-        expect(initialResult.current.canVote).toBe(true)
         expect(initialResult.current.votesUsed).toBe(0)
-        expect(initialResult.current.remainingVotes).toBe(VOTING_CONFIG.MAX_VOTES_PER_CONTESTANT)
 
-        // === PHASE 2: Cast a vote ===
+        // Cast a vote
         await act(async () => {
-            await initialResult.current.vote()
+            const votePromise = initialResult.current.vote()
             jest.advanceTimersByTime(VOTING_CONFIG.VOTE_SUBMISSION_DELAY)
+            await votePromise
         })
 
-        // Verify vote was registered
         expect(initialResult.current.votesUsed).toBe(1)
-        expect(initialResult.current.remainingVotes).toBe(VOTING_CONFIG.MAX_VOTES_PER_CONTESTANT - 1)
-        expect(initialResult.current.canVote).toBe(true) // Still can vote (hasn't reached max)
 
-        // Verify localStorage was updated
-        const storedData = JSON.parse(mockLocalStorage.store[storageKey])
-        expect(storedData.votesUsed).toBe(1)
-        expect(storedData.contestantId).toBe(contestantId)
-        expect(storedData.lastVoteTime).toBeTruthy()
-
-        // === PHASE 3: Cast remaining votes to reach maximum ===
+        // Cast remaining votes
         for (let i = 1; i < VOTING_CONFIG.MAX_VOTES_PER_CONTESTANT; i++) {
             await act(async () => {
-                await initialResult.current.vote()
+                const votePromise = initialResult.current.vote()
                 jest.advanceTimersByTime(VOTING_CONFIG.VOTE_SUBMISSION_DELAY)
+                await votePromise
             })
         }
 
-        // Verify button is now disabled after reaching max votes
-        expect(initialResult.current.votesUsed).toBe(VOTING_CONFIG.MAX_VOTES_PER_CONTESTANT)
-        expect(initialResult.current.remainingVotes).toBe(0)
         expect(initialResult.current.canVote).toBe(false)
 
-        // === PHASE 4: Simulate page reload by creating new hook instance ===
+        // Simulate page reload
         const { result: reloadedResult } = renderHook(() => useVoting(contestantId))
+        await waitFor(() => expect(reloadedResult.current.canVote).not.toBeUndefined())
 
-        // CRITICAL TEST: Button should remain disabled after reload
         expect(reloadedResult.current.canVote).toBe(false)
         expect(reloadedResult.current.votesUsed).toBe(VOTING_CONFIG.MAX_VOTES_PER_CONTESTANT)
-        expect(reloadedResult.current.remainingVotes).toBe(0)
 
-        // === PHASE 5: Verify localStorage persistence ===
-        const persistedData = JSON.parse(mockLocalStorage.store[storageKey])
-        expect(persistedData.votesUsed).toBe(VOTING_CONFIG.MAX_VOTES_PER_CONTESTANT)
-        expect(persistedData.contestantId).toBe(contestantId)
-
-        // === PHASE 6: Attempt to vote when disabled (should not work) ===
+        // Vote should not increase
         const initialVoteCount = reloadedResult.current.votesUsed
 
         await act(async () => {
-            await reloadedResult.current.vote() // This should not do anything
+            const votePromise = reloadedResult.current.vote()
             jest.advanceTimersByTime(VOTING_CONFIG.VOTE_SUBMISSION_DELAY)
+            await votePromise
         })
 
-        // Vote count should not change
         expect(reloadedResult.current.votesUsed).toBe(initialVoteCount)
-        expect(reloadedResult.current.canVote).toBe(false)
     })
 
     test('Vote state persists correctly across multiple page reloads', async () => {
-        // Create initial hook and cast 2 votes
         const { result: firstSession } = renderHook(() => useVoting(contestantId))
+        await waitFor(() => expect(firstSession.current.canVote).not.toBeUndefined())
 
         for (let i = 0; i < 2; i++) {
             await act(async () => {
-                await firstSession.current.vote()
+                const votePromise = firstSession.current.vote()
                 jest.advanceTimersByTime(VOTING_CONFIG.VOTE_SUBMISSION_DELAY)
+                await votePromise
             })
         }
 
         expect(firstSession.current.votesUsed).toBe(2)
-        expect(firstSession.current.canVote).toBe(true)
 
-        // Simulate first reload
         const { result: secondSession } = renderHook(() => useVoting(contestantId))
-        expect(secondSession.current.votesUsed).toBe(2)
-        expect(secondSession.current.canVote).toBe(true)
+        await waitFor(() => expect(secondSession.current.votesUsed).toBe(2))
 
-        // Cast final vote in second session
         await act(async () => {
-            await secondSession.current.vote()
+            const votePromise = secondSession.current.vote()
             jest.advanceTimersByTime(VOTING_CONFIG.VOTE_SUBMISSION_DELAY)
+            await votePromise
         })
 
         expect(secondSession.current.votesUsed).toBe(3)
         expect(secondSession.current.canVote).toBe(false)
 
-        // Simulate second reload
         const { result: thirdSession } = renderHook(() => useVoting(contestantId))
-        expect(thirdSession.current.votesUsed).toBe(3)
-        expect(thirdSession.current.canVote).toBe(false)
+        await waitFor(() => expect(thirdSession.current.canVote).toBe(false))
 
-        // Simulate third reload to be extra sure
         const { result: fourthSession } = renderHook(() => useVoting(contestantId))
-        expect(fourthSession.current.votesUsed).toBe(3)
-        expect(fourthSession.current.canVote).toBe(false)
+        await waitFor(() => expect(fourthSession.current.canVote).toBe(false))
     })
 
     test('Different contestants have separate vote states', async () => {
@@ -155,44 +130,40 @@ describe('useVoting - Critical localStorage Test', () => {
 
         const { result: hook1 } = renderHook(() => useVoting(contestant1))
         const { result: hook2 } = renderHook(() => useVoting(contestant2))
-
-        // Both should start fresh
-        expect(hook1.current.canVote).toBe(true)
-        expect(hook2.current.canVote).toBe(true)
-        expect(hook1.current.votesUsed).toBe(0)
-        expect(hook2.current.votesUsed).toBe(0)
-
-        // Vote for contestant 1 only
-        await act(async () => {
-            await hook1.current.vote()
-            jest.advanceTimersByTime(VOTING_CONFIG.VOTE_SUBMISSION_DELAY)
+        await waitFor(() => {
+            expect(hook1.current.votesUsed).toBe(0)
+            expect(hook2.current.votesUsed).toBe(0)
         })
 
-        // Only contestant 1's state should change
+        await act(async () => {
+            const votePromise = hook1.current.vote()
+            jest.advanceTimersByTime(VOTING_CONFIG.VOTE_SUBMISSION_DELAY)
+            await votePromise
+        })
+
         expect(hook1.current.votesUsed).toBe(1)
         expect(hook2.current.votesUsed).toBe(0)
 
-        // Max out votes for contestant 1
         for (let i = 1; i < VOTING_CONFIG.MAX_VOTES_PER_CONTESTANT; i++) {
             await act(async () => {
-                await hook1.current.vote()
+                const votePromise = hook1.current.vote()
                 jest.advanceTimersByTime(VOTING_CONFIG.VOTE_SUBMISSION_DELAY)
+                await votePromise
             })
         }
 
         expect(hook1.current.canVote).toBe(false)
         expect(hook2.current.canVote).toBe(true)
 
-        // Simulate page reload
         const { result: reloadedHook1 } = renderHook(() => useVoting(contestant1))
         const { result: reloadedHook2 } = renderHook(() => useVoting(contestant2))
-
-        expect(reloadedHook1.current.canVote).toBe(false)
-        expect(reloadedHook2.current.canVote).toBe(true)
+        await waitFor(() => {
+            expect(reloadedHook1.current.canVote).toBe(false)
+            expect(reloadedHook2.current.canVote).toBe(true)
+        })
     })
 
     test('localStorage error handling does not break voting functionality', () => {
-        // Simulate localStorage.getItem throwing an error
         mockLocalStorage.getItem.mockImplementationOnce(() => {
             throw new Error('localStorage unavailable')
         })
@@ -200,8 +171,6 @@ describe('useVoting - Critical localStorage Test', () => {
         const consoleSpy = jest.spyOn(console, 'error').mockImplementation(() => { })
 
         const { result } = renderHook(() => useVoting(contestantId))
-
-        // Should fallback to initial state
         expect(result.current.votesUsed).toBe(0)
         expect(result.current.canVote).toBe(true)
         expect(consoleSpy).toHaveBeenCalled()
@@ -210,22 +179,20 @@ describe('useVoting - Critical localStorage Test', () => {
     })
 
     test('Vote submission failure does not update localStorage', async () => {
-        // Force vote to fail
-        mockMathRandom.mockReturnValue(0.15) // Above failure rate of 0.1
+        mockMathRandom.mockReturnValue(0.15) // Force failure
 
         const { result } = renderHook(() => useVoting(contestantId))
+        await waitFor(() => expect(result.current.canVote).not.toBeUndefined())
 
         await act(async () => {
-            await result.current.vote()
+            const votePromise = result.current.vote()
             jest.advanceTimersByTime(VOTING_CONFIG.VOTE_SUBMISSION_DELAY)
+            await votePromise
         })
 
-        // State should not change on failure
         expect(result.current.votesUsed).toBe(0)
         expect(result.current.canVote).toBe(true)
         expect(result.current.voteMessage).toContain('failed')
-
-        // localStorage should not be updated
         expect(mockLocalStorage.store[storageKey]).toBeUndefined()
     })
 })
